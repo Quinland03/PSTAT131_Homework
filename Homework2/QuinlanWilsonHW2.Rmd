@@ -1,0 +1,165 @@
+---
+title: "Homework Assignment 1 PSTAT 131"
+author: "Quinlan Wilson and Jack Guo (both 131)"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output: pdf_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, echo=FALSE}
+library(knitr)
+library(MASS)
+library(dplyr)
+library(ggplot2)
+# set global chunk options: images will be 7x5 inches
+knitr::opts_chunk$set(
+	fig.height = 5,
+	fig.width = 7,
+	warning = FALSE
+)
+options(digits = 4)
+
+## indents are for indenting r code as formatted text
+## They may need to be adjusted depending on your OS
+# if your output looks odd, increase or decrease indent
+indent1 = '    '
+indent2 = '        '
+indent3 = '            '
+```
+
+```{r}
+algae <- read.table("algaeBloom.txt", col.names=
+                      c('season','size','speed','mxPH','mnO2','Cl','NO3','NH4',
+                        'oPO4','PO4','Chla','a1','a2','a3','a4','a5','a6','a7'),
+                    na = "XXXXXXX")
+glimpse(algae)
+```
+
+## 1. Descriptive summary statistics
+
+### (a)
+
+```{r}
+algae %>%
+  group_by(season) %>%
+  summarize(n = n())
+```
+
+### (b)
+
+```{r}
+c(Missing_Vals = sum(is.na(algae)))
+
+chemicals <- c("mxPH", "mnO2", "Cl", "NO3", "NH4", "oPO4", "PO4", "Chla")
+
+mean_and_var <- function(x) {
+  mean_x <- mean(x, na.rm = T)
+  var_x <- var(x, na.rm = T)
+  
+  return(c(Mean = mean_x, Variance = var_x))
+}
+
+sapply(algae[, chemicals], mean_and_var)
+```
+
+The means and the variances differ significantly between chemicals.
+Where mxPH and mnO2 have small variances and NH4, PO4, and oPO4 have
+massive ones.
+
+### (c)
+
+```{r}
+median_and_MAD <- function(x) {
+  median_x <- median(x, na.rm = T)
+  MAD_x <- median(abs(x - median_x), na.rm = T)
+  
+  return(c(median = median_x, MAD = MAD_x))
+}
+
+sapply(algae[, chemicals], median_and_MAD)
+```
+
+Comparing the mean and the median we can see that the means are
+typically higher than the medians. Additionally they medians and MAD's
+for the chemicals appear to be more calm suggesting that there are
+outliers in the observations. The only chemicals where this isn't the
+case are from mxPH and mnO2 where their means and medians are close
+along with not having extreme variances.
+
+## 2. Data visualization
+
+### (a) 
+
+The distribution is heavily skewed right for NH4
+
+### (b)
+
+```{r}
+algaeBloom<-algae
+algaeBloom <- na.omit(algaeBloom)
+algaeBloom$NH4 <- as.numeric(algaeBloom$NH4)
+
+ggplot(algaeBloom, aes(x = NH4)) +
+  geom_histogram(aes(y = ..density..), bins = 20) +
+  labs(
+    x="NH4",
+    y="Probability",
+    title="Histogram of NH4"
+  ) +
+  geom_density() +
+  geom_rug(sides='t')
+```
+
+
+### (c) 
+The box plots for all three speeds are skewed right.
+```{r}
+a4_speed <- algaeBloom %>%
+  select(a4, speed) %>%
+  group_by(speed)
+
+ggplot(a4_speed, aes(x=a4, y=speed)) +
+  geom_boxplot() +
+  labs(
+    title="A conditioned Boxplot of Algal a4"
+  )
+```
+
+## 3. Dealing with missing values
+
+### (a)
+
+```{r}
+sum(!complete.cases(algae))
+
+sapply(algae, function(x) sum(length(which(is.na(x)))))
+```
+
+### (b)
+
+```{r}
+algae.del <- algae %>%
+  filter(complete.cases(.))
+  
+nrow(algae.del)
+```
+
+## 4.
+
+### (a)
+
+The reducible error terms are
+$$Var(\hat{f}(x_0))+[Bias(\hat{f}(x_0))]^2$$ and the irreducible error
+term is $$Var(\epsilon)$$ \### (b)
+
+$$=E[(f(x_0) + \epsilon-\hat{f}(x_0))^2]$$
+$$=E[(f(x_0)-\hat{f}(x_0))^2]+2E[\epsilon(f(x_0)-\hat{f}(x_0))] + E[\epsilon^2]$$
+$$=E[(f(x_0)-\hat{f}(x_0))^2] + E[\epsilon^2]$$
+$$=Var(\hat{f}(x_0))+[Bias(\hat(f)(x_0))]^2+Var(\epsilon)$$ Since
+$Var(\hat{f}(x_0))+[Bias(\hat(f)(x_0))]^2 \ge 0$ that means
+$E[(f(x_0)-\hat{f}(x_0))^2] \ge Var(\epsilon)$.
+
+
+
