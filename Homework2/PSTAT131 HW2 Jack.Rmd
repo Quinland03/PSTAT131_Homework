@@ -1,0 +1,158 @@
+---
+title: "PSTAT131 HW 2 Jack"
+format: pdf
+editor: visual
+---
+
+### Algae Classification using Logistic regression
+
+```{r}
+library(tidyverse)
+library(ISLR)
+library(ROCR)
+
+algae <- read_table2("algaeBloom.txt", col_names=
+c('season','size','speed','mxPH','mnO2','Cl','NO3','NH4',
+'oPO4','PO4','Chla','a1','a2','a3','a4','a5','a6','a7'),
+na="XXXXXXX")
+
+## Take log of vars
+## Fill in missing
+## categorize into high/low based on a1
+algae.transformed <- algae %>% mutate_at(vars(4:11), funs(log(.)))
+algae.transformed <- algae.transformed %>%
+mutate_at(vars(4:11),funs(ifelse(is.na(.),median(.,na.rm=TRUE),.)))
+# a1 == 0 means low
+algae.transformed <- algae.transformed %>% mutate(a1 = factor(as.integer(a1 > 5), levels = c(0, 1)))
+
+## Misclassification error rate function
+calc_error_rate <- function(predicted.value, true.value){
+return(mean(true.value != predicted.value))
+}
+
+## Training/test sets
+set.seed(1)
+test.indices = sample(1:nrow(algae.transformed), 50)
+algae.train=algae.transformed[-test.indices,]
+algae.test=algae.transformed[test.indices,]
+```
+
+##### Part 1
+
+$z=\ln(\frac{p}{1-p})$
+
+$e^z=\frac{p}{1-p}$
+
+$e^z-pe^z-p=0$
+
+$p(1-e^z)=e^z$
+
+$p=\frac{e^z}{1-e^z}$
+
+##### Part 2
+
+Substitute $z=\beta_0+\beta_1x_1$ into odds.
+
+$\text{log odds}=log(\frac{p}{1-p})=z$
+
+$odds=\frac{p}{1-p}=e^z$
+
+$odds=e^{\beta_0+\beta_1x_1}$
+
+$odds=e^{\beta_0+\beta_1(x_1+2)}$
+
+$odds=e^{\beta_0+\beta_1x_1}*e^{2\beta_1}$
+
+The odds increase by a factor of $e^{2\beta_1}$.
+
+If $\beta_1$ is negative, $p$ approaches 0 as $x_1$ approaches $\infty$. $p$ approaches 1 as $x_1$ approaches $-\infty$.
+
+##### Part 3
+
+```{r}
+model <- glm(a1 ~ . - a2:a7, data=algae.transformed, family="binomial")
+predicted <- data.frame(predicted_val=predict(model, algae.test, type="response"))
+predicted_classified <- predicted %>% mutate(
+  a1=as.integer(predicted_val>.5)
+)
+predicted_classified ## predictions of test data
+
+## error rates
+calc_error_rate(predicted_classified$a1, algae.train$a1)
+calc_error_rate(predicted_classified$a1, algae.test$a1)
+```
+
+The training error is 0.573333 and the test error is 0.16.
+
+##### Part 4
+
+```{r}
+pred <- prediction(predicted_classified$a1, algae.test$a1)
+perf <- performance(pred, "tpr", "fpr")
+roc_data <- data.frame(
+  fpr = unlist(perf@x.values),
+  tpr = unlist(perf@y.values)
+)
+ggplot(roc_data, aes(x=fpr, y=tpr)) +
+  geom_line() +
+  labs(
+    title="ROC Curve",
+    x="False Positive Rate",
+    y="True Positive Rate"
+  ) 
+
+auc <- performance(pred,"auc")
+auc_value <- auc@y.values[[1]]
+print(paste("AUC =", auc_value))
+```
+
+### Cross-validation estimate of test error
+
+##### Part 1
+
+```{r}
+dat = subset(Smarket, select = -c(Year,Today))
+dat$Direction = ifelse(dat$Direction == "Up", 1,0)
+
+set.seed(123)
+test.indices = sample(1:nrow(dat), 1250/2)
+train=dat[-test.indices,]
+test=dat[test.indices,]
+
+model <- glm(Direction ~ ., data=train, family="binomial")
+pred <- data.frame(predicted_val=predict(model, test, type="response"))
+pred_classified <- pred %>% mutate(
+  Direction=as.integer(predicted_val>.5)
+)
+calc_error_rate(pred_classified$Direction, test$Direction)
+
+```
+
+##### Part 2
+
+```{r}
+do.chunk <- function(chunkid, folddef, dat, ...){
+# Get training index
+train = (folddef!=chunkid)
+# Get training set and validation set
+dat.train = dat[train, ]
+dat.val = dat[-train, ]
+# Train logistic regression model on training data
+fit.train = glm(Direction ~ ., family = binomial, data = dat.train)
+# get predicted value on the validation set
+pred.val = predict(fit.train, newdata = dat.val, type = "response")
+pred.val = ifelse(pred.val > .5, 1,0)
+data.frame(fold = chunkid,
+val.error = mean(pred.val != dat.val$Direction))
+}
+
+folddef <- sample(rep(1:10, length.out = nrow(dat)))
+
+results <- data.frame()
+for (k in 1:10) {
+  results <- rbind(results, do.chunk(k, folddef, dat))
+}
+mean(results$val.error)
+```
+
+The average validation error for the 10-fold cross-validation was 0.4698959.
