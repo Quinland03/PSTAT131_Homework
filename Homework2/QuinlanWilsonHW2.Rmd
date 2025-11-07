@@ -1,5 +1,5 @@
 ---
-title: "Homework Assignment 1 PSTAT 131"
+title: "Homework Assignment 2 PSTAT 131"
 author: "Quinlan Wilson and Jack Guo (both 131)"
 date: "`r format(Sys.Date(), '%B %d, %Y')`"
 output: pdf_document
@@ -10,9 +10,13 @@ editor_options:
 
 ```{r setup, echo=FALSE}
 library(knitr)
-library(MASS)
+library(tidyverse)
+library(ISLR)
+library(ROCR)
 library(dplyr)
 library(ggplot2)
+library(MASS)
+
 # set global chunk options: images will be 7x5 inches
 knitr::opts_chunk$set(
 	fig.height = 5,
@@ -29,137 +33,173 @@ indent2 = '        '
 indent3 = '            '
 ```
 
+## Linear Regression
+
+### (1.)
+
+```{r}
+glimpse(Auto)
+
+Auto_clean <- Auto %>%
+  dplyr::select(-contains("name")) %>%
+  mutate(origin = as.factor(origin))
+
+lmod <- lm(mpg ~ ., data = Auto_clean)
+summary(lmod)
+```
+
+With a $0.01$ threshold we can reject the null hypothesis that there is
+no linear association between mpg and displacement, weight, year, and
+origin. While failing to reject that cylinders, horsepower, and
+acceleration have no linear association with mpg.
+
+### (2.)
+
+```{r}
+training_MSE <- mean((Auto$mpg - predict(lmod, Auto_clean))^2)
+```
+
+The training MSE is `r training_MSE` and we cannot calculate the test
+MSE as the training set is the whole dataset so we have nothing to
+compare with.
+
+### (3.)
+
+```{r}
+car <- data.frame(
+  cylinders = 4,
+  displacement = 133,
+  horsepower = 117,
+  weight = 3250,
+  acceleration = 29,
+  year = 97,
+  origin = factor(2) 
+)
+
+
+car_pre_mpg <- predict(lmod, newdata = car)
+```
+
+The gas mileage predicted for an European car with 4 cylinders,
+displacement 133, horsepower of 117, weight of 3250, acceleration of 29,
+built in the year 1997 is `r car_pre_mpg`.
+
+### (4.)
+
+```{r}
+coef(lmod)
+```
+
+The difference in mpg between a Japanese car and the mpg of an American
+car is 2.85323 and the difference between a European car and an American
+car is 2.63000.
+
+### (5.)
+
+The change in mpg associated with a 30 unit increase in horsepower is
+`r  coef(lmod)[4] * 30`.
+
 ```{r}
 algae <- read.table("algaeBloom.txt", col.names=
                       c('season','size','speed','mxPH','mnO2','Cl','NO3','NH4',
                         'oPO4','PO4','Chla','a1','a2','a3','a4','a5','a6','a7'),
                     na = "XXXXXXX")
-glimpse(algae)
 ```
 
-## 1. Descriptive summary statistics
-
-### (a)
-
 ```{r}
-algae %>%
-  group_by(season) %>%
-  summarize(n = n())
+algae.transformed <- algae %>% mutate_at(vars(4:11), funs(log(.)))
+algae.transformed <- algae.transformed %>%
+mutate_at(vars(4:11),funs(ifelse(is.na(.),median(.,na.rm=TRUE),.)))
+# a1 == 0 means low
+algae.transformed <- algae.transformed %>% mutate(a1 = factor(as.integer(a1 > 5), levels = c(0, 1)))
 ```
 
-### (b)
+```{r}
+
+calc_error_rate <- function(predicted.value, true.value) {
+  return(mean(true.value != predicted.value))
+}
+```
 
 ```{r}
-c(Missing_Vals = sum(is.na(algae)))
+set.seed(1)
+test.indices = sample(1:nrow(algae.transformed), 50)
+algae.train=algae.transformed[-test.indices,]
+algae.test=algae.transformed[test.indices,]
+```
 
-chemicals <- c("mxPH", "mnO2", "Cl", "NO3", "NH4", "oPO4", "PO4", "Chla")
 
-mean_and_var <- function(x) {
-  mean_x <- mean(x, na.rm = T)
-  var_x <- var(x, na.rm = T)
-  
-  return(c(Mean = mean_x, Variance = var_x))
+
+## Algae Classification using Discriminant Analysis
+
+### (1.)
+
+```{r}
+lda_mod <- lda(a1 ~ ., data = algae.transformed, CV = T)
+
+
+lda_class <- lda_mod$class
+
+lda_error <- calc_error_rate(lda_class, algae.train$a1)
+lda_post <- lda_mod$posterior
+
+if (ncol(lda_post) == 1) {
+  lda_post <- cbind("0" = 1 - lda_post, "1" = lda_post)
 }
 
-sapply(algae[, chemicals], mean_and_var)
+lda_probs <- lda_post[, "1"]
+
+pred <- prediction(lda_mod$posterior[, "1"], algae.transformed$a1)
+perf <- performance(pred, 'tpr', 'fpr')
+
+plot(perf)
+pred_lda <- prediction(lda_probs, algae.transformed$a1)
+performance(pred_lda, "auc")@y.values[[1]]
+
 ```
 
-The means and the variances differ significantly between chemicals.
-Where mxPH and mnO2 have small variances and NH4, PO4, and oPO4 have
-massive ones.
-
-### (c)
+### (2.)
 
 ```{r}
-median_and_MAD <- function(x) {
-  median_x <- median(x, na.rm = T)
-  MAD_x <- median(abs(x - median_x), na.rm = T)
-  
-  return(c(median = median_x, MAD = MAD_x))
-}
+qda_mod <- qda(a1 ~ ., data = algae.transformed, CV = T)
+qda_class <- qda_mod$class
+qda_post <- qda_mod$posterior
 
-sapply(algae[, chemicals], median_and_MAD)
+if (ncol(qda_post) == 1) qda_post <- cbind("0" = 1 - qda_post, "1" = qda_post)
+
+qda_probs <- qda_post[, "1"]
+
+pred_qda <- prediction(qda_probs, algae.transformed$a1)
+perf_qda <- performance(pred_qda, "tpr", "fpr")
+auc_qda <- performance(pred_qda, "auc")@y.values[[1]]
+
+plot(perf_qda)
+
+auc_qda
+```
+LDA has a higher area under the ROC curve between the two models meaning it performs better at separating the two classes. LDA has the advantage of lower variance but in the case of different contrivances more bias is introduced.
+
+## Fundamentals of the bootstrap
+
+### (1.)
+
+$$(1-\frac{1}{n})^n$$
+
+### (2.)
+```{r}
+(1-1/1000)^1000
 ```
 
-Comparing the mean and the median we can see that the means are
-typically higher than the medians. Additionally they medians and MAD's
-for the chemicals appear to be more calm suggesting that there are
-outliers in the observations. The only chemicals where this isn't the
-case are from mxPH and mnO2 where their means and medians are close
-along with not having extreme variances.
-
-## 2. Data visualization
-
-### (a) 
-
-The distribution is heavily skewed right for NH4
-
-### (b)
+### (3.)
 
 ```{r}
-algaeBloom<-algae
-algaeBloom <- na.omit(algaeBloom)
-algaeBloom$NH4 <- as.numeric(algaeBloom$NH4)
+n <- 1000
 
-ggplot(algaeBloom, aes(x = NH4)) +
-  geom_histogram(aes(y = ..density..), bins = 20) +
-  labs(
-    x="NH4",
-    y="Probability",
-    title="Histogram of NH4"
-  ) +
-  geom_density() +
-  geom_rug(sides='t')
+sample <- sample(1:n, size = n, replace = T)
+
+missing <- n - length(unique(sample))
+
+ratio <- missing / n 
+ratio
 ```
-
-
-### (c) 
-The box plots for all three speeds are skewed right.
-```{r}
-a4_speed <- algaeBloom %>%
-  select(a4, speed) %>%
-  group_by(speed)
-
-ggplot(a4_speed, aes(x=a4, y=speed)) +
-  geom_boxplot() +
-  labs(
-    title="A conditioned Boxplot of Algal a4"
-  )
-```
-
-## 3. Dealing with missing values
-
-### (a)
-
-```{r}
-sum(!complete.cases(algae))
-
-sapply(algae, function(x) sum(length(which(is.na(x)))))
-```
-
-### (b)
-
-```{r}
-algae.del <- algae %>%
-  filter(complete.cases(.))
-  
-nrow(algae.del)
-```
-
-## 4.
-
-### (a)
-
-The reducible error terms are
-$$Var(\hat{f}(x_0))+[Bias(\hat{f}(x_0))]^2$$ and the irreducible error
-term is $$Var(\epsilon)$$ \### (b)
-
-$$=E[(f(x_0) + \epsilon-\hat{f}(x_0))^2]$$
-$$=E[(f(x_0)-\hat{f}(x_0))^2]+2E[\epsilon(f(x_0)-\hat{f}(x_0))] + E[\epsilon^2]$$
-$$=E[(f(x_0)-\hat{f}(x_0))^2] + E[\epsilon^2]$$
-$$=Var(\hat{f}(x_0))+[Bias(\hat(f)(x_0))]^2+Var(\epsilon)$$ Since
-$Var(\hat{f}(x_0))+[Bias(\hat(f)(x_0))]^2 \ge 0$ that means
-$E[(f(x_0)-\hat{f}(x_0))^2] \ge Var(\epsilon)$.
-
-
 
